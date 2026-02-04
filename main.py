@@ -1,7 +1,8 @@
 import time
 
-print("🚀 Futures paper bot Render üzerinde çalışıyor")
+print("🚀 BOT STARTED")
 
 while True:
-    print("⏱️ Bot ayakta:", time.strftime("%H:%M:%S"))
-    time.sleep(30)
+    print("⏱️ BOT ÇALIŞIYOR:", time.strftime("%H:%M:%S"))
+    time.sleep(10)
+
