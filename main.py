@@ -4,38 +4,35 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 
+# =====================
+# CONFIG
+# =====================
 SCAN_INTERVAL = 20
 TIMEFRAME = '5m'
 CANDLE_LIMIT = 30
 TOP_N = 10
-MIN_QUOTE_VOLUME = 5_000_000
+MIN_QUOTE_VOLUME = 5_000_000  # USDT
 
 # =====================
-# FORCE BINANCE FUTURES
+# BYBIT FUTURES (USDT PERP)
 # =====================
-exchange = ccxt.binance({
+exchange = ccxt.bybit({
     "enableRateLimit": True,
     "options": {
-        "defaultType": "future"
-    },
-    "urls": {
-        "api": {
-            "public": "https://fapi.binance.com/fapi/v1",
-            "private": "https://fapi.binance.com/fapi/v1"
-        }
+        "defaultType": "linear"  # USDT perpetual
     }
 })
 
 def get_usdt_perp_symbols():
-    info = exchange.fapiPublicGetExchangeInfo()
+    markets = exchange.load_markets()
     symbols = []
-    for s in info['symbols']:
+    for s, m in markets.items():
         if (
-            s['quoteAsset'] == 'USDT'
-            and s['contractType'] == 'PERPETUAL'
-            and s['status'] == 'TRADING'
+            m.get('linear')
+            and m.get('quote') == 'USDT'
+            and m.get('active')
         ):
-            symbols.append(s['symbol'])
+            symbols.append(s)
     return symbols
 
 def compute_metrics(ohlcv):
@@ -54,10 +51,8 @@ def scan_once(symbols):
     results = []
 
     for s in symbols:
-        symbol = s.replace("USDT", "/USDT")
-
         try:
-            ohlcv = exchange.fetch_ohlcv(symbol, TIMEFRAME, limit=CANDLE_LIMIT)
+            ohlcv = exchange.fetch_ohlcv(s, TIMEFRAME, limit=CANDLE_LIMIT)
             if len(ohlcv) < 10:
                 continue
 
@@ -65,7 +60,7 @@ def scan_once(symbols):
             score = abs(price_change) * (vol_ratio if not np.isnan(vol_ratio) else 1)
 
             results.append({
-                'symbol': symbol,
+                'symbol': s,
                 'price_change_%': price_change,
                 'volume_ratio': vol_ratio,
                 'score': score
@@ -81,24 +76,27 @@ def scan_once(symbols):
     return df.sort_values('score', ascending=False).head(TOP_N)
 
 def main():
-    print("🚀 BINANCE FUTURES SCANNER (451 FIXED)")
+    print("🚀 BYBIT FUTURES SCANNER BAŞLADI")
     symbols = get_usdt_perp_symbols()
-    print(f"🔎 Futures market sayısı: {len(symbols)}")
+    print(f"🔎 Taranan USDT perp market sayısı: {len(symbols)}")
 
     while True:
         now = datetime.utcnow().strftime('%H:%M:%S')
         top = scan_once(symbols)
 
         print("\n" + "="*70)
-        print(f"⏱️ {now} | En hareketli {len(top)} futures")
+        print(f"⏱️ {now} | En hareketli {len(top)} coin (son 5m)")
         print("="*70)
 
-        for _, r in top.iterrows():
-            print(
-                f"{r['symbol']:12} | "
-                f"Δ%: {r['price_change_%']:>6.2f} | "
-                f"Vol x: {0 if pd.isna(r['volume_ratio']) else r['volume_ratio']:.2f}"
-            )
+        if len(top) == 0:
+            print("— Uygun coin bulunamadı")
+        else:
+            for _, r in top.iterrows():
+                print(
+                    f"{r['symbol']:12} | "
+                    f"Δ%: {r['price_change_%']:>6.2f} | "
+                    f"Vol x: {0 if pd.isna(r['volume_ratio']) else r['volume_ratio']:.2f}"
+                )
 
         time.sleep(SCAN_INTERVAL)
 
