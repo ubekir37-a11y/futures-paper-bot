@@ -11,10 +11,9 @@ SCAN_INTERVAL = 20
 TIMEFRAME = '5m'
 CANDLE_LIMIT = 30
 TOP_N = 10
-MIN_QUOTE_VOLUME = 5_000_000  # USDT
 
 # =====================
-# BYBIT FUTURES (USDT PERP)
+# BYBIT FUTURES ONLY (NO SPOT)
 # =====================
 exchange = ccxt.bybit({
     "enableRateLimit": True,
@@ -24,15 +23,22 @@ exchange = ccxt.bybit({
 })
 
 def get_usdt_perp_symbols():
-    markets = exchange.load_markets()
+    """
+    Do NOT use load_markets()
+    Directly query linear futures instruments
+    """
+    response = exchange.publicGetV5MarketInstrumentsInfo({
+        "category": "linear"
+    })
+
     symbols = []
-    for s, m in markets.items():
+    for s in response["result"]["list"]:
         if (
-            m.get('linear')
-            and m.get('quote') == 'USDT'
-            and m.get('active')
+            s["quoteCoin"] == "USDT"
+            and s["status"] == "Trading"
         ):
-            symbols.append(s)
+            symbols.append(f"{s['symbol']}/USDT")
+
     return symbols
 
 def compute_metrics(ohlcv):
@@ -60,10 +66,10 @@ def scan_once(symbols):
             score = abs(price_change) * (vol_ratio if not np.isnan(vol_ratio) else 1)
 
             results.append({
-                'symbol': s,
-                'price_change_%': price_change,
-                'volume_ratio': vol_ratio,
-                'score': score
+                "symbol": s,
+                "price_change_%": price_change,
+                "volume_ratio": vol_ratio,
+                "score": score
             })
 
         except:
@@ -73,30 +79,27 @@ def scan_once(symbols):
         return []
 
     df = pd.DataFrame(results)
-    return df.sort_values('score', ascending=False).head(TOP_N)
+    return df.sort_values("score", ascending=False).head(TOP_N)
 
 def main():
-    print("🚀 BYBIT FUTURES SCANNER BAŞLADI")
+    print("🚀 BYBIT FUTURES SCANNER (SPOT BYPASS)")
     symbols = get_usdt_perp_symbols()
-    print(f"🔎 Taranan USDT perp market sayısı: {len(symbols)}")
+    print(f"🔎 USDT perp market sayısı: {len(symbols)}")
 
     while True:
-        now = datetime.utcnow().strftime('%H:%M:%S')
+        now = datetime.utcnow().strftime("%H:%M:%S")
         top = scan_once(symbols)
 
         print("\n" + "="*70)
-        print(f"⏱️ {now} | En hareketli {len(top)} coin (son 5m)")
+        print(f"⏱️ {now} | En hareketli {len(top)} futures (son 5m)")
         print("="*70)
 
-        if len(top) == 0:
-            print("— Uygun coin bulunamadı")
-        else:
-            for _, r in top.iterrows():
-                print(
-                    f"{r['symbol']:12} | "
-                    f"Δ%: {r['price_change_%']:>6.2f} | "
-                    f"Vol x: {0 if pd.isna(r['volume_ratio']) else r['volume_ratio']:.2f}"
-                )
+        for _, r in top.iterrows():
+            print(
+                f"{r['symbol']:12} | "
+                f"Δ%: {r['price_change_%']:>6.2f} | "
+                f"Vol x: {0 if pd.isna(r['volume_ratio']) else r['volume_ratio']:.2f}"
+            )
 
         time.sleep(SCAN_INTERVAL)
 
